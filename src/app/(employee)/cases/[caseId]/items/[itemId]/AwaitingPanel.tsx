@@ -5,10 +5,26 @@ import { AlertTriangleIcon, CheckCircleIcon, RefreshIcon } from "@/components/ic
 import { CopyField } from "@/components/CopyButton";
 import { Alert, Card, Spinner, button } from "@/components/ui";
 import { COPY } from "@/lib/copy";
+import type { Workflow } from "@/lib/status";
 import { readVerifyLink, saveVerifyLink } from "@/lib/verify-link-storage";
 import { regenerateLink } from "./actions";
 
 const noopSubscribe = () => () => {};
+
+const WORKFLOW_COPY: Record<Workflow, { heading: string; share: (hr: string) => string; submitted: string; warning: string }> = {
+  validation: {
+    heading: "Sent for validation",
+    share: (hr) => `Share the verification link with ${hr} so they can review your evidence.`,
+    submitted: "Submitted",
+    warning: COPY.hrLinkWarning,
+  },
+  request: {
+    heading: "Requested from HR",
+    share: (hr) => `Share the private link with ${hr} so they can respond and upload the document.`,
+    submitted: "Requested",
+    warning: COPY.requestLinkWarning,
+  },
+};
 
 export function AwaitingPanel({
   itemId,
@@ -17,6 +33,7 @@ export function AwaitingPanel({
   responseDueAt,
   overdue,
   hrContactName,
+  workflow,
 }: {
   itemId: string;
   submissionId: string;
@@ -24,7 +41,9 @@ export function AwaitingPanel({
   responseDueAt: string;
   overdue: boolean;
   hrContactName: string;
+  workflow: Workflow;
 }) {
+  const copy = WORKFLOW_COPY[workflow];
   // The link only exists in this tab's sessionStorage (set right after submitting).
   const stored = useSyncExternalStore(noopSubscribe, () => readVerifyLink(submissionId), () => null);
   const [fresh, setFresh] = useState<string | null>(null);
@@ -59,19 +78,17 @@ export function AwaitingPanel({
         </span>
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-slate-900">
-            {overdue ? "Response target passed" : "Sent for validation"}
+            {overdue ? "Response target passed" : copy.heading}
           </h2>
           <p className="mt-0.5 text-sm text-slate-600">
-            {overdue
-              ? `${hrContactName} hasn't responded by the response target yet.`
-              : `Share the verification link with ${hrContactName} so they can review your evidence.`}
+            {overdue ? `${hrContactName} hasn't responded by the response target yet.` : copy.share(hrContactName)}
           </p>
         </div>
       </div>
 
       <dl className="grid grid-cols-2 gap-4 border-y border-slate-100 px-5 py-4 text-sm sm:px-6">
         <div>
-          <dt className="text-slate-500">Submitted</dt>
+          <dt className="text-slate-500">{copy.submitted}</dt>
           <dd className="mt-0.5 font-semibold text-slate-900">{submittedAt}</dd>
         </div>
         <div>
@@ -81,17 +98,17 @@ export function AwaitingPanel({
       </dl>
 
       <div className="space-y-3 px-5 py-5 sm:px-6">
-        <h3 className="text-sm font-semibold text-slate-900">Verification link</h3>
+        <h3 className="text-sm font-semibold text-slate-900">{workflow === "request" ? "Private link for HR" : "Verification link"}</h3>
         {error && <Alert tone="error" role="alert">{error}</Alert>}
 
         {link ? (
           <>
             <CopyField value={link} label="Verification link" />
-            <p className="text-xs leading-5 text-slate-500">{COPY.hrLinkWarning}</p>
+            <p className="text-xs leading-5 text-slate-500">{copy.warning}</p>
           </>
         ) : (
           <p className="text-sm leading-6 text-slate-600">
-            For security, ExitProof shows a verification link only right after it&apos;s created. If you need to share it
+            For security, ExitProof shows a {workflow === "request" ? "private" : "verification"} link only right after it&apos;s created. If you need to share it
             again, create a new link. Any earlier link will stop working.
           </p>
         )}
@@ -117,7 +134,7 @@ export function AwaitingPanel({
         ) : (
           <button type="button" onClick={() => setConfirming(true)} className={button.secondary}>
             <RefreshIcon className="size-4" />
-            Create new verification link
+            {workflow === "request" ? "Create new private link" : "Create new verification link"}
           </button>
         )}
       </div>

@@ -22,6 +22,12 @@ const STATES: Record<ClosedState, { title: string; body: string; Icon: typeof XC
     Icon: CheckCircleIcon,
     tone: "bg-emerald-50 text-emerald-700",
   },
+  responded: {
+    title: "A response has already been sent",
+    body: "The requested document was already sent through this link, so it can't be used again. If the employee needs something else, they will send you a new link.",
+    Icon: CheckCircleIcon,
+    tone: "bg-emerald-50 text-emerald-700",
+  },
   not_current: {
     title: "This verification link is no longer current",
     body: "The employee has updated this item since this link was created. Ask them for their current verification link.",

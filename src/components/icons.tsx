@@ -38,6 +38,10 @@ export const ArrowLeftIcon = (p: P) => <Icon {...p}><path d="M19 12H5M11 18l-6-6
 export const UploadIcon = (p: P) => (
   <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m17 8-5-5-5 5M12 3v12" /></Icon>
 );
+export const DownloadIcon = (p: P) => (
+  <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5M12 15V3" /></Icon>
+);
+export const SendIcon = (p: P) => <Icon {...p}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4Z" /></Icon>;
 export const FileIcon = (p: P) => (
   <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></Icon>
 );

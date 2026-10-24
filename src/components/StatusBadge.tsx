@@ -4,6 +4,7 @@ import {
   CheckCircleIcon,
   CircleIcon,
   ClockIcon,
+  DownloadIcon,
   InfoCircleIcon,
   XCircleIcon,
 } from "./icons";
@@ -11,8 +12,12 @@ import {
 // Icon + text so status never depends on colour alone.
 const META: Record<DisplayStatus, { cls: string; Icon: typeof CircleIcon }> = {
   not_submitted: { cls: "bg-slate-100 text-slate-700 ring-slate-300/70", Icon: CircleIcon },
+  not_requested: { cls: "bg-slate-100 text-slate-700 ring-slate-300/70", Icon: CircleIcon },
   awaiting_validation: { cls: "bg-blue-50 text-blue-800 ring-blue-200", Icon: ClockIcon },
+  requested: { cls: "bg-blue-50 text-blue-800 ring-blue-200", Icon: ClockIcon },
+  hr_responded: { cls: "bg-violet-50 text-violet-800 ring-violet-200", Icon: DownloadIcon },
   validated: { cls: "bg-emerald-50 text-emerald-800 ring-emerald-200", Icon: CheckCircleIcon },
+  completed: { cls: "bg-emerald-50 text-emerald-800 ring-emerald-200", Icon: CheckCircleIcon },
   needs_information: { cls: "bg-amber-50 text-amber-900 ring-amber-300", Icon: InfoCircleIcon },
   rejected: { cls: "bg-rose-50 text-rose-800 ring-rose-200", Icon: XCircleIcon },
   overdue: { cls: "bg-red-700 text-white ring-red-700", Icon: AlertTriangleIcon },

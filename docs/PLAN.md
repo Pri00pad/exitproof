@@ -79,19 +79,21 @@ Chosen so 3–5 external testers and reviewers can get in reliably, with no depe
 
 **exit_cases** — id, owner_user_id (FK auth.users, not null), employee_name, company_name, hr_contact_name, hr_contact_email, last_working_day (nullable), response_days int default 7, created_at, updated_at.
 
-**exit_items** — id, case_id, title, is_default, sort_order, status (`not_submitted | awaiting_validation | validated | needs_information | rejected`), current_submission_id (nullable), created_at, updated_at.
+**exit_items** — id, case_id, title, is_default, sort_order, workflow_type (`validation | request`, default validation), status (validation: `not_submitted | awaiting_validation | validated | needs_information | rejected`; request: `not_submitted | requested | hr_responded | completed`), current_submission_id (nullable), created_at, updated_at.
 
 **submissions** — id, item_id, note, submitted_at, response_due_at (fixed at submit time = submitted_at + case.response_days), verify_token_hash (unique), verify_token_expires_at, decision (nullable), decided_at.
 
-**evidence_files** — id, submission_id, storage_path, original_name, mime_type, size_bytes, created_at.
+**evidence_files** — id, submission_id, storage_bucket (`evidence | hr-documents`), storage_path, original_name, mime_type, size_bytes, uploaded_by (`employee | hr`; employee ↔ evidence, hr ↔ hr-documents), created_at.
 
-**verification_events** — id, item_id, submission_id, actor (`employee | hr`), action (`submitted | approved | rejected | info_requested | link_regenerated`), comment, created_at.
+**verification_events** — id, item_id, submission_id, actor (`employee | hr`), action (`submitted | approved | rejected | info_requested | link_regenerated | responded | receipt_confirmed`), comment, created_at.
+
+**Workflows.** Validation items (Knowledge Transfer, Laptop / Asset Return, Expense / Reimbursement, custom items): the employee submits evidence; HR approves, requests information or rejects. Request items (Relieving / Experience Letter, Full & Final Settlement): the employee sends a request note; HR uploads 1–5 documents (comment optional) and clicks Send to Employee → Document Available; the employee downloads and clicks Confirm Received → Completed (final). If the document is wrong, the employee requests again: a new submission, token and response target; the previous link stays closed and earlier documents remain as history.
 
 Constraints: comment required for `rejected` / `info_requested`; HR decisions use conditional updates (`WHERE status = 'awaiting_validation' AND current_submission_id = $sub`), making double-submits harmless. Employee RLS policies do not allow setting `validated` — only the server-side HR action (secret key) can.
 
 "Overdue" is a display status computed from the row; it is never written.
 
-**Resolved** = Validated. Rejected and Needs Information items can be resubmitted (new submission, new HR link; old link stops working).
+**Resolved** = Validated (validation) or Completed (request). Document Available is not resolved until the employee confirms receipt. Rejected and Needs Information items can be resubmitted (new submission, new HR link; old link stops working).
 
 ## Routes
 
@@ -154,6 +156,7 @@ Fictional data. Employee window + HR incognito window.
 - **Verifier identity (accepted MVP limitation):** Anyone with the secure verification link can perform the verifier action. Production would add verified corporate-email/domain or organization authentication. HR remains the intended verifier; the verify page warns that anyone with the link can validate, and the employee is told to share it only with their HR contact. This includes the employee themselves, since they hold the link.
 - **Wording:** a decision proves possession of the link, not who clicked it. UI and product copy say **"Validated"** or **"Validated via verification link"** and never claim that ExitProof verified the HR person's identity (no "verified by HR", "confirmed by <name>", or "cryptographically verified").
 - Evidence: private bucket, uuid paths under `{user_id}/`, allowlist PDF/PNG/JPG/WEBP, ≤10 MB, ≤5 files per submission, no SVG/HTML. HR gets short-lived signed URLs only after token validation.
+- HR documents (request workflow): private `hr-documents` bucket, same limits, paths `{owner}/{item}/{submission}/{uuid}.ext`. A request link can only upload into its own submission's folder, via server-issued signed upload URLs (at most 20 objects per round); `hr_respond` re-checks every path. Employees have SELECT-only Storage access to documents on their own items and download through an ownership-checked route that redirects to a 60-second signed URL. No public URLs. The request page says "Anyone with this private link can respond to this request."
 - Sensitive content hint on upload ("Upload only what HR needs to verify this item"). No retention/deletion policy in MVP — documented limitation.
 - Demo credentials never committed; `.env*` is git-ignored except `.env.example`.
 

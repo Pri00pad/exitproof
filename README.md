@@ -18,7 +18,9 @@ npm install
 npm run dev                  # http://localhost:3000
 ```
 
-Database: run `supabase/migrations/20261024100000_initial_schema.sql` once in the Supabase SQL Editor (tables, RLS, functions, private `evidence` bucket and storage policies). In Supabase Auth, enable Email sign-ups and turn **Confirm email** off.
+Database: run each file in `supabase/migrations/` once in the Supabase SQL Editor, **in filename order, one file per run** (each run must succeed before the next): the initial schema, then the request-workflow enums, then the request workflow (tables, RLS, functions, private `evidence` and `hr-documents` buckets and storage policies). In Supabase Auth, enable Email sign-ups and turn **Confirm email** off.
+
+For local development against a separate Supabase project, put its three values in `.env.development.local` (git-ignored). `npm run dev` reads it in preference to `.env.local`; `next build` / `next start` do not.
 
 ## Deploying to Vercel
 

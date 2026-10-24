@@ -4,7 +4,7 @@ import { useActionState, type ReactNode } from "react";
 import { CheckIcon } from "@/components/icons";
 import { Alert, Card, Spinner, TextField, button, inputClass } from "@/components/ui";
 import { COPY } from "@/lib/copy";
-import { DEFAULT_EXIT_ITEMS, DEFAULT_RESPONSE_DAYS } from "@/lib/status";
+import { DEFAULT_EXIT_ITEMS, DEFAULT_RESPONSE_DAYS, workflowForTitle } from "@/lib/status";
 import { createExitCase, type StartFormState } from "./actions";
 
 const initialState: StartFormState = {};
@@ -25,7 +25,7 @@ export function StartForm() {
         <TextField label="Company name" name="company_name" required maxLength={200} autoComplete="organization" defaultValue={v?.company_name} />
       </Section>
 
-      <Section step={3} title="HR contact" description="The person who will validate your exit items.">
+      <Section step={3} title="HR contact" description="The person who will validate your exit items and respond to your requests.">
         <div className="grid gap-4 sm:grid-cols-2">
           <TextField label="HR contact name" name="hr_contact_name" required maxLength={200} defaultValue={v?.hr_contact_name} />
           <TextField label="HR contact email" name="hr_contact_email" type="email" required defaultValue={v?.hr_contact_email} />
@@ -49,7 +49,11 @@ export function StartForm() {
         </div>
       </Section>
 
-      <Section step={5} title="Items to track" description="Choose what HR needs to validate. You can add your own.">
+      <Section
+        step={5}
+        title="Items to track"
+        description="Choose what HR needs to validate or provide. Items marked “Request from HR” are documents you ask HR for. You can add your own."
+      >
         <fieldset>
           <legend className="sr-only">Default exit items</legend>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -68,7 +72,12 @@ export function StartForm() {
                 <span className="flex size-5 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-transparent transition-colors peer-checked:border-blue-700 peer-checked:bg-blue-700 peer-checked:text-white">
                   <CheckIcon className="size-3.5" />
                 </span>
-                <span className="text-sm font-medium text-slate-800">{title}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-slate-800">{title}</span>
+                  {workflowForTitle(title) === "request" && (
+                    <span className="block text-xs text-slate-500">{COPY.requestTag}</span>
+                  )}
+                </span>
               </label>
             ))}
           </div>

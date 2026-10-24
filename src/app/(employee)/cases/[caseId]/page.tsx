@@ -7,7 +7,7 @@ import { Card, button } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { COPY } from "@/lib/copy";
 import { formatDate, formatDateOnly } from "@/lib/format";
-import { displayStatus, type DisplayStatus } from "@/lib/status";
+import { displayStatus, isResolved, isWaitingOnHr, pickNextStep, type DisplayStatus } from "@/lib/status";
 import { createClient } from "@/lib/supabase/server";
 import type { DashboardItemRow, ExitCaseRow } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
@@ -33,7 +33,7 @@ export default async function DashboardPage({ params }: PageProps<"/cases/[caseI
   const { data, error: itemsError } = await supabase
     .from("exit_items")
     .select(
-      "id, title, status, sort_order, current:submissions!exit_items_current_submission_fk(submitted_at, response_due_at, hr_comment)",
+      "id, title, status, workflow_type, sort_order, current:submissions!exit_items_current_submission_fk(submitted_at, response_due_at, hr_comment)",
     )
     .eq("case_id", caseId)
     .order("sort_order");
@@ -42,9 +42,10 @@ export default async function DashboardPage({ params }: PageProps<"/cases/[caseI
   const now = new Date();
   const items: Item[] = ((data ?? []) as unknown as DashboardItemRow[]).map((item) => ({
     ...item,
-    display: displayStatus(item.status, item.current ? new Date(item.current.response_due_at) : null, now),
+    display: displayStatus(item.status, item.workflow_type, item.current ? new Date(item.current.response_due_at) : null, now),
   }));
-  const resolved = items.filter((i) => i.status === "validated").length;
+  // Validated (validation) or Completed (request). Document Available is not resolved yet.
+  const resolved = items.filter((i) => isResolved(i.status)).length;
   const total = items.length;
   const percent = total ? Math.round((resolved / total) * 100) : 0;
   const allResolved = total > 0 && resolved === total;
@@ -141,34 +142,32 @@ function NextStep({ caseId, items, allResolved }: { caseId: string; items: Item[
     );
   }
 
-  const pick =
-    items.find((i) => i.display === "needs_information") ??
-    items.find((i) => i.display === "rejected") ??
-    items.find((i) => i.display === "overdue") ??
-    items.find((i) => i.display === "not_submitted");
+  const pick = pickNextStep(items);
 
   if (!pick) {
-    const waiting = items.filter((i) => i.display === "awaiting_validation").length;
+    const waiting = items.filter((i) => isWaitingOnHr(i.status)).length;
     return (
       <Card className="flex items-start gap-3 px-5 py-4">
         <ClockIcon className="mt-0.5 size-5 text-blue-600" />
         <div>
           <p className="text-sm font-semibold text-slate-900">Waiting for HR</p>
           <p className="mt-0.5 text-sm text-slate-600">
-            {waiting} {waiting === 1 ? "item is" : "items are"} awaiting validation. Response targets are shown below.
+            {waiting} {waiting === 1 ? "item is" : "items are"} waiting for HR. Response targets are shown below.
           </p>
         </div>
       </Card>
     );
   }
 
-  const copy: Record<string, { title: string; cta: string }> = {
+  const copy: Partial<Record<DisplayStatus, { title: string; cta: string }>> = {
+    hr_responded: { title: `HR sent the document for ${pick.title}`, cta: "Review & confirm" },
     needs_information: { title: `More information was requested for ${pick.title}`, cta: "Provide Updated Evidence" },
     rejected: { title: `${pick.title} was rejected by the verifier`, cta: "Resubmit Evidence" },
     overdue: { title: `${pick.title} is past its response target`, cta: "View item" },
     not_submitted: { title: `Submit evidence for ${pick.title}`, cta: "Add evidence" },
+    not_requested: { title: `Request ${pick.title} from HR`, cta: "Request from HR" },
   };
-  const { title, cta } = copy[pick.display];
+  const { title, cta } = copy[pick.display]!;
 
   return (
     <Card className="flex flex-col gap-4 border-blue-200 bg-blue-50/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -186,6 +185,7 @@ function NextStep({ caseId, items, allResolved }: { caseId: string; items: Item[
 
 function ItemCard({ caseId, item }: { caseId: string; item: Item }) {
   const urgent = item.display === "overdue";
+  const isRequest = item.workflow_type === "request";
   return (
     <Link
       href={`/cases/${caseId}/items/${item.id}`}
@@ -194,17 +194,20 @@ function ItemCard({ caseId, item }: { caseId: string; item: Item }) {
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <h3 className="text-base font-semibold text-slate-900">{item.title}</h3>
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-slate-900">{item.title}</h3>
+          {isRequest && <p className="text-xs text-slate-500">{COPY.requestTag}</p>}
+        </div>
         <StatusBadge status={item.display} />
       </div>
 
       {item.current ? (
         <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
           <div className="flex gap-1.5">
-            <dt className="text-slate-500">Submitted</dt>
+            <dt className="text-slate-500">{isRequest ? "Requested" : "Submitted"}</dt>
             <dd className="font-medium text-slate-800">{formatDate(item.current.submitted_at)}</dd>
           </div>
-          {(item.display === "awaiting_validation" || urgent) && (
+          {(isWaitingOnHr(item.status) || urgent) && (
             <div className="flex gap-1.5">
               <dt className="text-slate-500">Response target</dt>
               <dd className={`font-medium ${urgent ? "text-red-700" : "text-slate-800"}`}>
@@ -214,12 +217,21 @@ function ItemCard({ caseId, item }: { caseId: string; item: Item }) {
           )}
         </dl>
       ) : (
-        <p className="mt-3 text-sm text-slate-500">No evidence submitted yet.</p>
+        <p className="mt-3 text-sm text-slate-500">{isRequest ? "Not requested yet." : "No evidence submitted yet."}</p>
+      )}
+
+      {item.status === "hr_responded" && (
+        <p className="mt-3 text-sm text-violet-800">HR sent the document. Download it and confirm you received it.</p>
       )}
 
       {item.current?.hr_comment && (item.status === "needs_information" || item.status === "rejected") && (
         <p className="mt-3 line-clamp-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
           <span className="font-medium">Verifier comment:</span> {item.current.hr_comment}
+        </p>
+      )}
+      {item.current?.hr_comment && item.status === "hr_responded" && (
+        <p className="mt-3 line-clamp-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <span className="font-medium">HR comment:</span> {item.current.hr_comment}
         </p>
       )}
 

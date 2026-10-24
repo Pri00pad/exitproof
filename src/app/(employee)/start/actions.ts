@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth";
-import { DEFAULT_EXIT_ITEMS, DEFAULT_RESPONSE_DAYS } from "@/lib/status";
+import { DEFAULT_EXIT_ITEMS, DEFAULT_RESPONSE_DAYS, workflowForTitle } from "@/lib/status";
 import { createClient } from "@/lib/supabase/server";
 import { MAX_CUSTOM_ITEMS, formText, isEmail } from "@/lib/validation";
 
@@ -89,6 +89,8 @@ export async function createExitCase(_prev: StartFormState, formData: FormData):
       case_id: created.id,
       title,
       is_default: DEFAULT_TITLES.includes(title),
+      // Relieving letter and F&F are requests to HR; everything else (custom items too) is validated.
+      workflow_type: workflowForTitle(title),
       sort_order: index,
     })),
   );

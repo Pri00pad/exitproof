@@ -1,4 +1,5 @@
 import "server-only";
+import type { Workflow } from "./status";
 import { createAdminClient } from "./supabase/admin";
 import { hashVerifyToken } from "./tokens";
 
@@ -18,6 +19,7 @@ export type VerifierFile = {
 };
 
 export type VerificationRequest = {
+  workflow: Workflow;
   employeeName: string;
   companyName: string;
   itemTitle: string;
@@ -27,11 +29,12 @@ export type VerificationRequest = {
   files: VerifierFile[];
 };
 
+export type ClosedState = "invalid" | "expired" | "reviewed" | "responded" | "not_current";
+
+// workflow is included on closed states when the link matched a submission
+// (display only: it picks the page header label). Unknown links have none.
 export type VerificationLookup =
-  | { state: "invalid" }
-  | { state: "expired" }
-  | { state: "reviewed" }
-  | { state: "not_current" }
+  | { state: ClosedState; workflow?: Workflow }
   | { state: "ready"; request: VerificationRequest };
 
 // Tokens are 32 random bytes, base64url → 43 chars. Anything else is rejected
@@ -47,45 +50,78 @@ type SubmissionRow = {
   response_due_at: string;
   verify_token_expires_at: string;
   decision: string | null;
-  evidence_files: { id: string; original_name: string; mime_type: string; size_bytes: number; storage_path: string }[];
+  evidence_files: {
+    id: string;
+    original_name: string;
+    mime_type: string;
+    size_bytes: number;
+    storage_bucket: string;
+    storage_path: string;
+    uploaded_by: string;
+  }[];
   item: {
+    id: string;
     title: string;
     status: string;
+    workflow_type: Workflow;
     current_submission_id: string | null;
-    exit_case: { employee_name: string; company_name: string } | null;
+    exit_case: { owner_user_id: string; employee_name: string; company_name: string } | null;
   } | null;
 };
 
-export async function loadVerification(token: string): Promise<VerificationLookup> {
+type Admin = ReturnType<typeof createAdminClient>;
+
+// The one place a token is resolved to a submission. Returns the row only if
+// the link may still act: right hash, not decided, not expired, and still the
+// item's current round in the status its workflow expects.
+export async function resolveToken(
+  admin: Admin,
+  token: string,
+): Promise<
+  | { state: ClosedState; workflow?: Workflow }
+  | { state: "ready"; sub: SubmissionRow & { item: NonNullable<SubmissionRow["item"]> } }
+> {
   if (!isWellFormedToken(token)) return { state: "invalid" };
 
-  const admin = createAdminClient();
   const { data, error } = await admin
     .from("submissions")
     .select(
       "id, note, submitted_at, response_due_at, verify_token_expires_at, decision, " +
-        "evidence_files(id, original_name, mime_type, size_bytes, storage_path), " +
-        "item:exit_items!submissions_item_id_fkey(title, status, current_submission_id, exit_case:exit_cases(employee_name, company_name))",
+        "evidence_files(id, original_name, mime_type, size_bytes, storage_bucket, storage_path, uploaded_by), " +
+        "item:exit_items!submissions_item_id_fkey(id, title, status, workflow_type, current_submission_id, " +
+        "exit_case:exit_cases(owner_user_id, employee_name, company_name))",
     )
     .eq("verify_token_hash", hashVerifyToken(token))
     .maybeSingle();
   if (error) throw new Error("Could not load this verification request.");
 
   const sub = data as unknown as SubmissionRow | null;
-  // Order matters: a decided link should say "already reviewed" even after expiry.
+  // Order matters: a decided link should say so even after expiry.
   if (!sub || !sub.item || !sub.item.exit_case) return { state: "invalid" };
-  if (sub.decision) return { state: "reviewed" };
-  if (new Date(sub.verify_token_expires_at) < new Date()) return { state: "expired" };
-  if (sub.item.current_submission_id !== sub.id || sub.item.status !== "awaiting_validation") {
-    return { state: "not_current" };
-  }
+  const workflow = sub.item.workflow_type;
+  if (sub.decision === "responded") return { state: "responded", workflow };
+  if (sub.decision) return { state: "reviewed", workflow };
+  if (new Date(sub.verify_token_expires_at) < new Date()) return { state: "expired", workflow };
+  const waitingStatus = workflow === "request" ? "requested" : "awaiting_validation";
+  if (sub.item.current_submission_id !== sub.id || sub.item.status !== waitingStatus) return { state: "not_current", workflow };
 
-  const files = await signFiles(admin, sub.evidence_files);
+  return { state: "ready", sub: { ...sub, item: sub.item } };
+}
+
+export async function loadVerification(token: string): Promise<VerificationLookup> {
+  const admin = createAdminClient();
+  const resolved = await resolveToken(admin, token);
+  if (resolved.state !== "ready") return resolved;
+
+  const { sub } = resolved;
+  // The verifier only ever sees the employee's own evidence.
+  const files = await signFiles(admin, sub.evidence_files.filter((f) => f.uploaded_by === "employee"));
   return {
     state: "ready",
     request: {
-      employeeName: sub.item.exit_case.employee_name,
-      companyName: sub.item.exit_case.company_name,
+      workflow: sub.item.workflow_type,
+      employeeName: sub.item.exit_case!.employee_name,
+      companyName: sub.item.exit_case!.company_name,
       itemTitle: sub.item.title,
       submittedAt: sub.submitted_at,
       responseDueAt: sub.response_due_at,
@@ -95,15 +131,13 @@ export async function loadVerification(token: string): Promise<VerificationLooku
   };
 }
 
-// Short-lived signed URLs; the bucket stays private. The signed URL contains the
-// object path ({user_id}/{item_id}/{uuid}.ext — ids only, no secrets) and expires.
-async function signFiles(
-  admin: ReturnType<typeof createAdminClient>,
-  rows: SubmissionRow["evidence_files"],
-): Promise<VerifierFile[]> {
-  const bucket = admin.storage.from("evidence");
+// Short-lived signed URLs; the buckets stay private. Each file is signed from
+// its own row's bucket and path. The signed URL contains the object path
+// ({user_id}/{item_id}/{uuid}.ext — ids only, no secrets) and expires.
+async function signFiles(admin: Admin, rows: SubmissionRow["evidence_files"]): Promise<VerifierFile[]> {
   return Promise.all(
     rows.map(async (f) => {
+      const bucket = admin.storage.from(f.storage_bucket);
       const [view, download] = await Promise.all([
         bucket.createSignedUrl(f.storage_path, SIGNED_URL_SECONDS),
         bucket.createSignedUrl(f.storage_path, SIGNED_URL_SECONDS, { download: f.original_name }),

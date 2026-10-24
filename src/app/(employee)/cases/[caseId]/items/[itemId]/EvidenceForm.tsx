@@ -1,24 +1,15 @@
 "use client";
 
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { FileIcon, UploadIcon, XIcon } from "@/components/icons";
+import { FilePicker } from "@/components/FilePicker";
 import { Alert, Card, Spinner, button, inputClass } from "@/components/ui";
 import { COPY } from "@/lib/copy";
-import { formatBytes } from "@/lib/format";
+import { ACCEPTED_FILE_TYPES } from "@/lib/files";
 import { createClient } from "@/lib/supabase/browser";
 import { saveVerifyLink } from "@/lib/verify-link-storage";
 import { submitEvidence, type EvidenceFileInput } from "./actions";
 
-// Must match the evidence bucket's allowlist (see migration).
-const ACCEPTED: Record<string, string> = {
-  "application/pdf": "pdf",
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/webp": "webp",
-};
-const MAX_FILES = 5;
-const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_NOTE = 5000;
 
 type Phase = "idle" | "uploading" | "sending";
@@ -42,44 +33,15 @@ const MODE_COPY: Record<Mode, { heading: string; intro: string; cta: string }> =
   },
 };
 
+// Validation workflow: the employee submits evidence for HR to validate.
 export function EvidenceForm({ itemId, userId, mode }: { itemId: string; userId: string; mode: Mode }) {
   const copy = MODE_COPY[mode];
   const router = useRouter();
-  const inputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [dragging, setDragging] = useState(false);
   const busy = phase !== "idle";
-
-  function addFiles(list: FileList | null) {
-    if (!list?.length) return;
-    const next = [...files];
-    const problems: string[] = [];
-    for (const file of Array.from(list)) {
-      if (!ACCEPTED[file.type]) {
-        problems.push(`${file.name} isn't a PDF, PNG, JPG or WEBP file.`);
-      } else if (file.size > MAX_BYTES) {
-        problems.push(`${file.name} is larger than 10 MB.`);
-      } else if (file.size === 0) {
-        problems.push(`${file.name} is empty.`);
-      } else if (next.length >= MAX_FILES) {
-        problems.push(`You can attach up to ${MAX_FILES} files.`);
-        break;
-      } else if (!next.some((f) => f.name === file.name && f.size === file.size)) {
-        next.push(file);
-      }
-    }
-    setFiles(next);
-    setError(problems.length ? problems.join(" ") : null);
-  }
-
-  function onDrop(e: DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    if (!busy) addFiles(e.dataTransfer.files);
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -95,7 +57,7 @@ export function EvidenceForm({ itemId, userId, mode }: { itemId: string; userId:
     const supabase = createClient();
     const uploaded: EvidenceFileInput[] = [];
     for (const file of files) {
-      const path = `${userId}/${itemId}/${crypto.randomUUID()}.${ACCEPTED[file.type]}`;
+      const path = `${userId}/${itemId}/${crypto.randomUUID()}.${ACCEPTED_FILE_TYPES[file.type]}`;
       const { error: uploadError } = await supabase.storage
         .from("evidence")
         .upload(path, file, { contentType: file.type, upsert: false });
@@ -147,71 +109,15 @@ export function EvidenceForm({ itemId, userId, mode }: { itemId: string; userId:
           </span>
         </label>
 
-        <div>
-          <span className="text-sm font-medium text-slate-800">Evidence files</span>
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (!busy) setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            className={`mt-1.5 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors ${
-              dragging ? "border-blue-600 bg-blue-50" : "border-slate-300 bg-slate-50/70"
-            }`}
-          >
-            <span className="mx-auto flex size-10 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm ring-1 ring-slate-200">
-              <UploadIcon className="size-5" />
-            </span>
-            <p className="mt-3 text-sm text-slate-700">
-              <button
-                type="button"
-                onClick={() => inputRef.current?.click()}
-                disabled={busy || files.length >= MAX_FILES}
-                className={button.link}
-              >
-                Choose files
-              </button>{" "}
-              <span className="hidden sm:inline">or drag and drop them here</span>
-            </p>
-            <p className="mt-1 text-xs text-slate-500">PDF, PNG, JPG or WEBP · up to 10 MB each · max {MAX_FILES} files</p>
-            <input
-              ref={inputRef}
-              type="file"
-              multiple
-              accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
-              tabIndex={-1}
-              aria-label="Choose evidence files"
-              className="sr-only"
-              onChange={(e) => {
-                addFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </div>
-          <p className="mt-1.5 text-xs text-slate-500">{COPY.uploadHint}</p>
-
-          {files.length > 0 && (
-            <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {files.map((file, index) => (
-                <li key={`${file.name}-${file.size}`} className="flex items-center gap-3 px-3 py-2.5">
-                  <FileIcon className="size-4 text-slate-400" />
-                  <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{file.name}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-slate-500">{formatBytes(file.size)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setFiles(files.filter((_, i) => i !== index))}
-                    disabled={busy}
-                    aria-label={`Remove ${file.name}`}
-                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-700"
-                  >
-                    <XIcon className="size-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <FilePicker
+          label="Evidence files"
+          hint={COPY.uploadHint}
+          inputLabel="Choose evidence files"
+          files={files}
+          onChange={setFiles}
+          onProblem={setError}
+          disabled={busy}
+        />
 
         <div className="border-t border-slate-100 pt-5">
           <button type="submit" disabled={busy} className={`${button.primary} w-full sm:w-auto`}>
