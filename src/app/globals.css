@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@layer base {
+  :where(a, summary):focus-visible {
+    outline: 2px solid var(--color-blue-700);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+}
